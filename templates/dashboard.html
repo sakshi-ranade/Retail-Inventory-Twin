@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{ retailer_id }} — Retail Inventory Twin</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --navy:    #0f172a;
+      --navy2:   #1e293b;
+      --accent:  #3b82f6;
+      --accent2: #60a5fa;
+      --critical:#ef4444;
+      --warning: #f59e0b;
+      --safe:    #22c55e;
+      --muted:   #64748b;
+      --border:  #e2e8f0;
+      --bg:      #f8fafc;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); font-family: 'Segoe UI', system-ui, sans-serif; color: #1e293b; }
+
+    /* ── TOP NAV ── */
+    .topnav {
+      background: var(--navy);
+      padding: 0 2rem;
+      height: 62px;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,.35);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .topnav-left { display:flex; align-items:center; gap:1rem; }
+    .btn-back {
+      color: #94a3b8; background: transparent; border: 1.5px solid #334155;
+      border-radius: 8px; padding: .3rem .8rem; font-size: .8rem; font-weight: 600;
+      cursor: pointer; display:inline-flex; align-items:center; gap:.35rem;
+      transition: all .15s; text-decoration:none;
+    }
+    .btn-back:hover { border-color: var(--accent2); color: var(--accent2); }
+    .brand { display:flex; align-items:center; gap:.5rem; color:#f1f5f9; font-size:1rem; font-weight:700; }
+    .brand i { color:var(--accent2); font-size:1.3rem; }
+    .retailer-badge {
+      background: var(--accent); color:#fff; padding:.25rem .8rem;
+      border-radius:20px; font-size:.82rem; font-weight:700; letter-spacing:.3px;
+    }
+    .topnav-right { color:#94a3b8; font-size:.8rem; }
+
+    /* ── MAIN ── */
+    .main-wrap { max-width:1280px; margin:0 auto; padding:1.6rem 1.5rem 3rem; }
+
+    /* ── KPI CARDS ── */
+    .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.6rem; }
+    .kpi-card {
+      background:#fff; border-radius:12px; padding:1.1rem 1.3rem;
+      box-shadow:0 1px 4px rgba(0,0,0,.07);
+      display:flex; align-items:center; gap:1rem;
+    }
+    .kpi-icon { width:46px; height:46px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.35rem; flex-shrink:0; }
+    .kpi-icon.all      { background:#eff6ff; color:var(--accent); }
+    .kpi-icon.critical { background:#fef2f2; color:var(--critical); }
+    .kpi-icon.warning  { background:#fffbeb; color:var(--warning); }
+    .kpi-icon.safe     { background:#f0fdf4; color:var(--safe); }
+    .kpi-val { font-size:1.75rem; font-weight:700; line-height:1; }
+    .kpi-lbl { font-size:.78rem; color:var(--muted); margin-top:2px; text-transform:uppercase; letter-spacing:.5px; }
+
+    /* ── SECTION HEADER ── */
+    .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:.8rem; }
+    .section-title { font-size:1rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:.4rem; }
+
+    /* ── EXECUTIVE SUMMARY ── */
+    .summary-card {
+      background:#fff; border-radius:12px;
+      box-shadow:0 1px 4px rgba(0,0,0,.07);
+      margin-bottom:1.4rem; overflow:hidden;
+    }
+    .summary-card .card-hdr {
+      padding:.85rem 1.3rem; border-bottom:1px solid var(--border);
+      display:flex; align-items:center; gap:.5rem;
+    }
+    .summary-card .card-hdr .icon-wrap {
+      width:32px; height:32px; border-radius:8px;
+      background:#eff6ff; color:var(--accent);
+      display:flex; align-items:center; justify-content:center; font-size:1.05rem;
+    }
+    .summary-card .card-body-inner { padding:1.2rem 1.5rem; }
+    .summary-para {
+      font-size:.92rem; line-height:1.7; color:#334155;
+      margin-bottom:1rem; padding:1rem 1.2rem;
+      background:#f8fafc; border-left:3px solid var(--accent);
+      border-radius:0 8px 8px 0;
+    }
+    .summary-section-title {
+      font-size:.78rem; text-transform:uppercase; letter-spacing:.7px;
+      color:var(--muted); font-weight:700; margin:1rem 0 .5rem;
+    }
+    .summary-bullets { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:.4rem; }
+    .summary-bullets li {
+      font-size:.88rem; padding:.55rem .9rem;
+      border-radius:8px; display:flex; align-items:flex-start; gap:.6rem; line-height:1.45;
+    }
+    .summary-bullets li.crit { background:#fef2f2; border-left:3px solid var(--critical); }
+    .summary-bullets li.warn { background:#fffbeb; border-left:3px solid var(--warning); }
+    .summary-bullets li.safe-item { background:#f0fdf4; border-left:3px solid var(--safe); }
+    .summary-bullets li .dot { flex-shrink:0; margin-top:1px; }
+    .action-box {
+      margin-top:1rem; padding:.9rem 1.1rem;
+      background: linear-gradient(135deg, #eff6ff, #dbeafe);
+      border-radius:10px; display:flex; align-items:center; gap:.7rem;
+      font-size:.88rem; font-weight:600; color:#1d4ed8;
+    }
+    .action-box i { font-size:1.2rem; }
+
+    /* ── CHART CARD ── */
+    .chart-card {
+      background:#fff; border-radius:12px; padding:1.3rem 1.5rem;
+      box-shadow:0 1px 4px rgba(0,0,0,.07); margin-bottom:1.4rem;
+    }
+    .chart-card canvas { max-height:220px; }
+
+    /* ── TABLE CARD ── */
+    .table-card {
+      background:#fff; border-radius:12px;
+      box-shadow:0 1px 4px rgba(0,0,0,.07); overflow:hidden;
+      margin-bottom:1.4rem;
+    }
+    .table-card .card-hdr {
+      padding:.85rem 1.3rem; border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .table-card table { width:100%; border-collapse:collapse; }
+    .table-card thead th {
+      background:#f8fafc; padding:.7rem 1rem;
+      font-size:.72rem; text-transform:uppercase; letter-spacing:.6px;
+      color:var(--muted); border-bottom:1px solid var(--border); font-weight:600; white-space:nowrap;
+    }
+    .table-card tbody tr { border-bottom:1px solid #f1f5f9; transition:background .12s; }
+    .table-card tbody tr:hover { background:#f8fafc; }
+    .table-card tbody td { padding:.7rem 1rem; font-size:.875rem; vertical-align:middle; }
+
+    /* ── BADGES ── */
+    .badge-alert {
+      display:inline-flex; align-items:center; gap:.3rem;
+      padding:.25rem .7rem; border-radius:20px; font-size:.72rem; font-weight:700; letter-spacing:.3px;
+    }
+    .badge-alert.CRITICAL { background:#fef2f2; color:var(--critical); }
+    .badge-alert.WARNING  { background:#fffbeb; color:#b45309; }
+    .badge-alert.SAFE     { background:#f0fdf4; color:#15803d; }
+
+    /* ── STOCK BAR ── */
+    .stock-bar { height:6px; border-radius:3px; background:#e2e8f0; overflow:hidden; margin-top:4px; }
+    .stock-fill { height:100%; border-radius:3px; }
+
+    .days-badge { font-weight:700; }
+    .days-badge.critical { color:var(--critical); }
+    .days-badge.warning  { color:#b45309; }
+    .days-badge.safe     { color:#15803d; }
+
+    /* ── PURCHASE ORDER ── */
+    .po-panel {
+      background:#fff; border-radius:12px;
+      box-shadow:0 1px 4px rgba(0,0,0,.07); overflow:hidden;
+    }
+    .po-header {
+      background: linear-gradient(135deg, var(--navy) 0%, #1e3a5f 100%);
+      padding:1.2rem 1.5rem; color:#fff;
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .po-header .po-title { font-size:1rem; font-weight:700; display:flex; align-items:center; gap:.5rem; }
+    .po-meta { display:grid; grid-template-columns:repeat(4,auto); gap:.5rem 2rem; padding:1rem 1.5rem; background:#f8fafc; border-bottom:1px solid var(--border); }
+    .po-meta-item .lbl { font-size:.7rem; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+    .po-meta-item .val { font-size:.9rem; font-weight:600; color:#0f172a; }
+    .po-empty { text-align:center; padding:2.5rem; color:var(--muted); font-size:.9rem; }
+    .po-table table { width:100%; border-collapse:collapse; }
+    .po-table thead th {
+      background:#f8fafc; padding:.65rem 1rem;
+      font-size:.71rem; text-transform:uppercase; letter-spacing:.6px;
+      color:var(--muted); border-bottom:1px solid var(--border); font-weight:600;
+    }
+    .po-table tbody tr { border-bottom:1px solid #f1f5f9; }
+    .po-table tbody tr:hover { background:#f8fafc; }
+    .po-table tbody td { padding:.65rem 1rem; font-size:.875rem; vertical-align:middle; }
+    .po-footer {
+      display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;
+      padding:.9rem 1.5rem; border-top:1px solid var(--border); background:#f8fafc;
+    }
+    .po-footer .total-label { font-size:.8rem; color:var(--muted); }
+    .po-footer .total-val { font-size:1rem; font-weight:700; color:#0f172a; }
+
+    /* ── BUTTONS ── */
+    .btn-print {
+      background:var(--accent); color:#fff; border:none;
+      border-radius:8px; padding:.4rem 1rem; font-size:.82rem; font-weight:600;
+      cursor:pointer; display:inline-flex; align-items:center; gap:.4rem; transition:background .15s;
+    }
+    .btn-print:hover { background:#2563eb; }
+
+    .spinner-wrap { text-align:center; padding:3rem; color:var(--muted); }
+
+    /* ── PRINT ── */
+    @media print {
+      .topnav, .kpi-grid, .chart-card, .no-print { display:none !important; }
+      .po-panel, .summary-card, .table-card { box-shadow:none; }
+      body { background:#fff; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── TOP NAV ── -->
+<nav class="topnav">
+  <div class="topnav-left">
+    <a href="/" class="btn-back"><i class="bi bi-arrow-left"></i> All Retailers</a>
+    <div class="brand"><i class="bi bi-boxes"></i> Retail Inventory Twin</div>
+    <span class="retailer-badge">{{ retailer_id }}</span>
+  </div>
+  <div></div>
+</nav>
+
+<!-- ── MAIN ── -->
+<div class="main-wrap">
+
+  <!-- KPI CARDS -->
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-icon all"><i class="bi bi-grid-3x3-gap-fill"></i></div><div><div class="kpi-val" id="kpi-total">—</div><div class="kpi-lbl">Total Categories</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon critical"><i class="bi bi-exclamation-triangle-fill"></i></div><div><div class="kpi-val" id="kpi-critical" style="color:var(--critical)">—</div><div class="kpi-lbl">Critical Alerts</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon warning"><i class="bi bi-exclamation-circle-fill"></i></div><div><div class="kpi-val" id="kpi-warning" style="color:#b45309">—</div><div class="kpi-lbl">Warnings</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon safe"><i class="bi bi-check-circle-fill"></i></div><div><div class="kpi-val" id="kpi-safe" style="color:var(--safe)">—</div><div class="kpi-lbl">Safe</div></div></div>
+  </div>
+
+  <!-- EXECUTIVE SUMMARY -->
+  <div class="summary-card">
+    <div class="card-hdr">
+      <div class="icon-wrap"><i class="bi bi-file-text-fill"></i></div>
+      <div class="section-title">Executive Summary — Plain English Report</div>
+    </div>
+    <div class="card-body-inner" id="summary-body">
+      <div class="spinner-wrap"><div class="spinner-border text-primary" role="status"></div></div>
+    </div>
+  </div>
+
+  <!-- CHART -->
+  <div class="chart-card no-print">
+    <div class="section-hdr">
+      <div class="section-title"><i class="bi bi-bar-chart-fill" style="color:var(--accent)"></i> Days Until Stock-Out by Category</div>
+    </div>
+    <canvas id="stockoutChart"></canvas>
+  </div>
+
+  <!-- STOCKOUT TABLE -->
+  <div class="table-card">
+    <div class="card-hdr">
+      <div class="section-title"><i class="bi bi-table" style="color:var(--accent)"></i> Full Stock-Out Report</div>
+      <div style="font-size:.8rem; color:var(--muted);">Sorted by urgency</div>
+    </div>
+    <div id="stockout-table-wrap">
+      <div class="spinner-wrap"><div class="spinner-border text-primary" role="status"></div></div>
+    </div>
+  </div>
+
+  <!-- PURCHASE ORDER -->
+  <div class="section-hdr">
+    <div class="section-title"><i class="bi bi-file-earmark-text-fill" style="color:var(--accent)"></i> Purchase Order</div>
+    <button class="btn-print no-print" onclick="window.print()"><i class="bi bi-printer"></i> Print / Save PDF</button>
+  </div>
+  <div class="po-panel" id="po-panel">
+    <div class="spinner-wrap"><div class="spinner-border text-primary" role="status"></div></div>
+  </div>
+
+</div><!-- /main-wrap -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const RETAILER_ID = "{{ retailer_id }}";
+
+  let chartInstance = null;
+
+  // ── Boot ──
+  (async function() {
+    const [stockRes, poRes] = await Promise.all([
+      fetch(`/api/stockout/${RETAILER_ID}`).then(r => r.json()),
+      fetch(`/api/purchase_order/${RETAILER_ID}`).then(r => r.json())
+    ]);
+    renderKPIs(stockRes.summary);
+    renderSummary(stockRes.items, stockRes.summary, poRes);
+    renderChart(stockRes.items);
+    renderTable(stockRes.items);
+    renderPO(poRes);
+  })();
+
+  // ── KPIs ──
+  function renderKPIs(s) {
+    document.getElementById('kpi-total').textContent    = s.total;
+    document.getElementById('kpi-critical').textContent = s.critical;
+    document.getElementById('kpi-warning').textContent  = s.warning;
+    document.getElementById('kpi-safe').textContent     = s.safe;
+  }
+
+  // ── Executive Summary ──
+  function renderSummary(items, summary, po) {
+    const critItems = items.filter(i => i.alert_level === 'CRITICAL');
+    const warnItems = items.filter(i => i.alert_level === 'WARNING');
+    const safeItems = items.filter(i => i.alert_level === 'SAFE');
+
+    // Most urgent item
+    const mostUrgent = items[0];
+    const totalUnits = po.total_units || 0;
+    const totalLines = po.total_line_items || 0;
+
+    // Opening paragraph
+    let urgencyPhrase = '';
+    if (summary.critical > 0) {
+      urgencyPhrase = `<strong style="color:#ef4444">${summary.critical} categories are critically low</strong> (running out within 7 days) and
+        <strong>${summary.warning} are approaching their reorder point</strong> (8–14 days remaining).
+        Immediate action is required.`;
+    } else if (summary.warning > 0) {
+      urgencyPhrase = `<strong style="color:#b45309">${summary.warning} categories are approaching reorder levels</strong> (8–14 days remaining). No critical shortages at this time, but orders should be placed soon.`;
+    } else {
+      urgencyPhrase = `<strong style="color:#15803d">All ${summary.total} categories are well-stocked.</strong> No immediate action required.`;
+    }
+
+    const para = `
+      <div class="summary-para">
+        As of today, <strong>you are tracking ${summary.total} product categories</strong>.
+        ${urgencyPhrase}
+        ${totalLines > 0 ? `A purchase order covering <strong>${totalLines} categories</strong> totalling <strong>${totalUnits.toLocaleString()} units</strong> is ready below.` : ''}
+      </div>`;
+
+    // Critical bullets
+    let critHtml = '';
+    if (critItems.length) {
+      const bullets = critItems.map(i => `
+        <li class="crit">
+          <span class="dot">🔴</span>
+          <span><strong>${i.category}</strong> — only <strong>${i.days_until_stockout} day(s)</strong> of stock left.
+          Running out on <strong>${i.stockout_date}</strong>. Current stock: ${i.current_stock.toLocaleString()} units
+          (selling ~${i.avg_daily_sales}/day).
+          ${i.recommended_order_qty > 0 ? `<em>Order <strong>${i.recommended_order_qty.toLocaleString()} units</strong> now.</em>` : ''}</span>
+        </li>`).join('');
+      critHtml = `<div class="summary-section-title">🔴 Immediate Action Required — Stockout Within 7 Days</div><ul class="summary-bullets">${bullets}</ul>`;
+    }
+
+    // Warning bullets
+    let warnHtml = '';
+    if (warnItems.length) {
+      const bullets = warnItems.map(i => `
+        <li class="warn">
+          <span class="dot">🟡</span>
+          <span><strong>${i.category}</strong> — <strong>${i.days_until_stockout} day(s)</strong> remaining.
+          Stock-out projected on <strong>${i.stockout_date}</strong>. Current stock: ${i.current_stock.toLocaleString()} units.
+          ${i.recommended_order_qty > 0 ? `<em>Plan to order <strong>${i.recommended_order_qty.toLocaleString()} units</strong>.</em>` : ''}</span>
+        </li>`).join('');
+      warnHtml = `<div class="summary-section-title">🟡 Order Soon — Stockout Within 8–14 Days</div><ul class="summary-bullets">${bullets}</ul>`;
+    }
+
+    // Safe bullets
+    let safeHtml = '';
+    if (safeItems.length) {
+      const bullets = safeItems.map(i => `
+        <li class="safe-item">
+          <span class="dot">🟢</span>
+          <span><strong>${i.category}</strong> — <strong>${i.days_until_stockout} day(s)</strong> of stock. No action needed yet.</span>
+        </li>`).join('');
+      safeHtml = `<div class="summary-section-title">🟢 Well Stocked — No Action Needed</div><ul class="summary-bullets">${bullets}</ul>`;
+    }
+
+    // Action box
+    const actionHtml = totalLines > 0
+      ? `<div class="action-box"><i class="bi bi-cart-check-fill"></i>
+          A purchase order for <strong>${totalLines} categories</strong> (${totalUnits.toLocaleString()} total units)
+          has been generated. Expected delivery by <strong>${po.expected_delivery}</strong>. See Purchase Order below.
+        </div>`
+      : `<div class="action-box" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7); color:#15803d;">
+          <i class="bi bi-check-circle-fill"></i> No purchase order needed at this time.
+        </div>`;
+
+    document.getElementById('summary-body').innerHTML = para + critHtml + warnHtml + safeHtml + actionHtml;
+  }
+
+  // ── Chart ──
+  function renderChart(items) {
+    const labels = items.map(i => i.category);
+    const days   = items.map(i => i.days_until_stockout);
+    const colors = items.map(i =>
+      i.alert_level === 'CRITICAL' ? '#ef4444' :
+      i.alert_level === 'WARNING'  ? '#f59e0b' : '#22c55e'
+    );
+    if (chartInstance) chartInstance.destroy();
+    const ctx = document.getElementById('stockoutChart').getContext('2d');
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Days Until Stock-Out',
+          data: days,
+          backgroundColor: colors,
+          borderRadius: 5,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => ` ${c.parsed.y} day(s) remaining` } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: { beginAtZero: true, title: { display: true, text: 'Days' }, grid: { color: '#f1f5f9' } }
+        }
+      }
+    });
+  }
+
+  // ── Table ──
+  function renderTable(items) {
+    const maxStock = Math.max(...items.map(i => i.current_stock));
+    const rows = items.map(item => {
+      const ac = item.alert_level;
+      const dot = ac==='CRITICAL' ? '🔴' : ac==='WARNING' ? '🟡' : '🟢';
+      const pct = Math.min(100, Math.round((item.current_stock / maxStock) * 100));
+      const barColor = ac==='CRITICAL' ? '#ef4444' : ac==='WARNING' ? '#f59e0b' : '#22c55e';
+      const daysClass = ac==='CRITICAL' ? 'critical' : ac==='WARNING' ? 'warning' : 'safe';
+      const reorderCell = item.recommended_order_qty > 0
+        ? `<strong>${item.recommended_order_qty.toLocaleString()}</strong>`
+        : `<span style="color:var(--muted)">—</span>`;
+      return `
+        <tr>
+          <td><div style="font-weight:600">${item.category}</div></td>
+          <td>
+            <div style="font-weight:600">${item.current_stock.toLocaleString()}</div>
+            <div class="stock-bar"><div class="stock-fill" style="width:${pct}%;background:${barColor}"></div></div>
+          </td>
+          <td style="color:var(--muted);font-size:.82rem">${item.avg_daily_sales}/day</td>
+          <td><span class="days-badge ${daysClass}">${item.days_until_stockout}d</span></td>
+          <td style="font-size:.82rem;color:#475569">${item.stockout_date}</td>
+          <td style="color:var(--muted);font-size:.82rem">${item.reorder_level.toLocaleString()}</td>
+          <td>${reorderCell}</td>
+          <td><span class="badge-alert ${ac}">${dot} ${ac}</span></td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('stockout-table-wrap').innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th><th>Current Stock</th><th>Avg Daily Sales</th>
+            <th>Days Left</th><th>Stockout Date</th><th>Reorder Level</th>
+            <th>Reorder Qty</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  // ── Purchase Order ──
+  function renderPO(po) {
+    let body = '';
+    if (!po.items || po.items.length === 0) {
+      body = `<div class="po-empty"><i class="bi bi-check-circle-fill text-success" style="font-size:2rem"></i><div class="mt-2">No items require ordering at this time.</div></div>`;
+    } else {
+      const rows = po.items.map((item, idx) => {
+        const dot = item.alert_level==='CRITICAL' ? '🔴' : '🟡';
+        return `
+          <tr>
+            <td style="color:var(--muted)">${String(idx+1).padStart(2,'0')}</td>
+            <td style="font-weight:600">${item.category}</td>
+            <td>${item.current_stock.toLocaleString()}</td>
+            <td><span class="days-badge ${item.alert_level.toLowerCase()}">${item.days_until_stockout}d</span></td>
+            <td style="font-size:.82rem">${item.stockout_date}</td>
+            <td>${item.reorder_level.toLocaleString()}</td>
+            <td style="font-weight:700;color:var(--accent)">${item.recommended_order_qty.toLocaleString()}</td>
+            <td><span class="badge-alert ${item.alert_level}">${dot} ${item.alert_level}</span></td>
+          </tr>`;
+      }).join('');
+
+      body = `
+        <div class="po-table">
+          <table>
+            <thead>
+              <tr><th>#</th><th>Category</th><th>Current Stock</th><th>Days Left</th>
+                  <th>Stockout Date</th><th>Reorder Level</th><th>Order Qty</th><th>Priority</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="po-footer">
+          <div><div class="total-label">Total Line Items</div><div class="total-val">${po.total_line_items} categories</div></div>
+          <div><div class="total-label">Total Units to Order</div><div class="total-val" style="color:var(--accent)">${po.total_units.toLocaleString()} units</div></div>
+          <div><div class="total-label">Expected Delivery</div><div class="total-val">${po.expected_delivery}</div></div>
+          <div class="no-print">
+            <button class="btn-print" onclick="window.print()"><i class="bi bi-printer"></i> Print / Save PDF</button>
+          </div>
+        </div>`;
+    }
+
+    document.getElementById('po-panel').innerHTML = `
+      <div class="po-header">
+        <div class="po-title"><i class="bi bi-file-earmark-check"></i> Purchase Order</div>
+        <div style="font-size:.82rem;opacity:.8">Auto-generated from stockout forecast</div>
+      </div>
+      <div class="po-meta">
+        <div class="po-meta-item"><div class="lbl">PO Number</div><div class="val">${po.po_number}</div></div>
+        <div class="po-meta-item"><div class="lbl">Retailer</div><div class="val">${po.retailer_id}</div></div>
+        <div class="po-meta-item"><div class="lbl">Order Date</div><div class="val">${po.order_date}</div></div>
+        <div class="po-meta-item"><div class="lbl">Expected Delivery</div><div class="val">${po.expected_delivery}</div></div>
+      </div>
+      ${body}`;
+  }
+</script>
+</body>
+</html>
