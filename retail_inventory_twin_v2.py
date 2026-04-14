@@ -31,7 +31,7 @@ from sklearn.preprocessing import StandardScaler
 # ─────────────────────────────────────────────
 CSV_PATH        = "inventory_demand_data.csv"
 CSV_PATH_2024   = "inventory_demand_data_2024.csv"
-OWM_API_KEY     = "e1d69092dc4501736ab7604f73ecf233"
+OWM_API_KEY     = " PASTE API KEY HERE"
 CITY            = "San Jose,US"
 TARGET_CATEGORY = "Frozen"
 DB_PATH         = "inventory.db"
