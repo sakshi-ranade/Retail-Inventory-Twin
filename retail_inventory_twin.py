@@ -7,9 +7,15 @@ Retail Inventory Twin
 4. Predict next 30 days & visualise forecast
 """
 
+# -*- coding: utf-8 -*-
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 import sqlite3
 import requests
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from prophet import Prophet
@@ -198,7 +204,7 @@ def build_joined_db(sales_df: pd.DataFrame, weather_df: pd.DataFrame, db_path: s
 def train_and_forecast(df: pd.DataFrame, category: str, retailer_id: str = None, forecast_days: int = 30):
     """
     Train Prophet model for a specific category and optionally filter by retailer.
-    If retailer_id is None, trains on all retailers combined.
+    Trains on Jan 2024 - Nov 2025, forecasts through Dec 31, 2025.
     """
     if retailer_id:
         cat_df = (
@@ -220,7 +226,12 @@ def train_and_forecast(df: pd.DataFrame, category: str, retailer_id: str = None,
         )
         label = category
     
-    print(f"\n📦 Training on '{label}' — {len(cat_df)} daily observations")
+    # Filter to training period: Jan 2024 - Nov 2025 (predict Dec 2025)
+    training_cutoff = pd.Timestamp("2025-12-01")
+    cat_df_train = cat_df[cat_df["ds"] < training_cutoff].copy()
+    
+    print(f"\n📦 Training on '{label}' — {len(cat_df_train)} daily observations (Jan 2024 - Nov 2025)")
+    print(f"   Date range: {cat_df_train['ds'].min().date()} → {cat_df_train['ds'].max().date()}")
 
     # Add weather regressors if available
     has_weather = "final_temp_f" in df.columns and df["final_temp_f"].notna().any()
@@ -229,19 +240,21 @@ def train_and_forecast(df: pd.DataFrame, category: str, retailer_id: str = None,
         if retailer_id:
             weather_agg = (
                 df[(df["category"].str.lower() == category.lower()) & 
-                   (df["retailer_id"] == retailer_id)]
+                   (df["retailer_id"] == retailer_id) &
+                   (df["date"] < training_cutoff)]
                 .groupby("date", as_index=False)[["final_temp_f", "final_humidity_pct"]]
                 .mean()
                 .rename(columns={"date": "ds"})
             )
         else:
             weather_agg = (
-                df[df["category"].str.lower() == category.lower()]
+                df[(df["category"].str.lower() == category.lower()) &
+                   (df["date"] < training_cutoff)]
                 .groupby("date", as_index=False)[["final_temp_f", "final_humidity_pct"]]
                 .mean()
                 .rename(columns={"date": "ds"})
             )
-        cat_df = cat_df.merge(weather_agg, on="ds", how="left")
+        cat_df_train = cat_df_train.merge(weather_agg, on="ds", how="left")
 
     m = Prophet(
         yearly_seasonality=True,
@@ -255,18 +268,21 @@ def train_and_forecast(df: pd.DataFrame, category: str, retailer_id: str = None,
         m.add_regressor("final_temp_f")
         m.add_regressor("final_humidity_pct")
 
-    m.fit(cat_df)
+    m.fit(cat_df_train)
 
-    # Build future dataframe
-    future = m.make_future_dataframe(periods=forecast_days)
+    # Create future dataframe explicitly through Dec 31, 2025
+    last_train_date = cat_df_train["ds"].max()
+    dec_31 = pd.Timestamp("2025-12-31")
+    future_dates = pd.date_range(start=last_train_date + pd.Timedelta(days=1), end=dec_31, freq="D")
+    future = pd.DataFrame({"ds": future_dates})
 
     if has_weather:
         # For future dates we extrapolate regressors using last 30-day rolling mean
-        last_temp     = cat_df["final_temp_f"].iloc[-30:].mean()
-        last_humidity = cat_df["final_humidity_pct"].iloc[-30:].mean()
+        last_temp     = cat_df_train["final_temp_f"].iloc[-30:].mean()
+        last_humidity = cat_df_train["final_humidity_pct"].iloc[-30:].mean()
         
         # Merge with historical weather data
-        future = future.merge(cat_df[["ds", "final_temp_f", "final_humidity_pct"]], on="ds", how="left")
+        future = future.merge(cat_df_train[["ds", "final_temp_f", "final_humidity_pct"]], on="ds", how="left")
         
         # Fill NaN values using assignment (not inplace) to avoid ChainedAssignmentError
         # Use last 30-day mean for future dates, or 0 as fallback if mean is also NaN
@@ -274,61 +290,150 @@ def train_and_forecast(df: pd.DataFrame, category: str, retailer_id: str = None,
         future["final_humidity_pct"] = future["final_humidity_pct"].fillna(last_humidity if pd.notna(last_humidity) else 50)
 
     forecast = m.predict(future)
-    return m, forecast, cat_df
+    cat_df_train["y_original"] = cat_df_train["y"]
+    return m, forecast, cat_df_train
 
 
 # ─────────────────────────────────────────────
 # 5. VISUALISE
 # ─────────────────────────────────────────────
-def visualise(m, forecast, cat_df, category: str):
-    fig, axes = plt.subplots(3, 1, figsize=(14, 12))
-    fig.suptitle(f"Retail Inventory Twin — '{category}' Demand Forecast", fontsize=15, fontweight="bold")
-
-    # — Panel 1: full forecast —
-    ax = axes[0]
-    history_mask = forecast["ds"].isin(cat_df["ds"])
-    ax.fill_between(forecast["ds"], forecast["yhat_lower"], forecast["yhat_upper"],
-                    alpha=0.25, color="steelblue", label="95% CI")
-    ax.plot(forecast["ds"], forecast["yhat"], color="steelblue", lw=1.8, label="Forecast")
-    ax.scatter(cat_df["ds"], cat_df["y"], s=8, color="black", alpha=0.5, label="Actual sales")
-    # Shade the future window
-    split = cat_df["ds"].max()
-    ax.axvline(split, color="red", ls="--", lw=1, label="Forecast start")
-    ax.set_title("Daily Sales Volume — History + 30-day Forecast")
-    ax.set_ylabel("Units sold")
-    ax.legend(fontsize=8)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha="right")
-
-    # — Panel 2: trend component —
-    ax2 = axes[1]
-    ax2.plot(forecast["ds"], forecast["trend"], color="darkorange", lw=1.8)
-    ax2.set_title("Trend Component")
-    ax2.set_ylabel("Trend")
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-    ax2.xaxis.set_major_locator(mdates.MonthLocator())
-    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30, ha="right")
-
-    # — Panel 3: weekly seasonality —
-    ax3 = axes[2]
-    weekly_cols = [c for c in forecast.columns if c.startswith("weekly")]
-    if weekly_cols:
-        # Extract one representative week from the middle of the dataset
-        mid = len(forecast) // 2
-        week_slice = forecast.iloc[mid:mid+7].copy()
-        week_slice["dow"] = week_slice["ds"].dt.day_name()
-        ax3.bar(week_slice["dow"], week_slice[weekly_cols[0]], color="mediumseagreen")
-        ax3.set_title("Weekly Seasonality Effect")
-        ax3.set_ylabel("Effect on sales")
-        ax3.axhline(0, color="black", lw=0.8)
-    else:
-        ax3.text(0.5, 0.5, "Weekly seasonality not available", ha="center", transform=ax3.transAxes)
-
+def visualise(m, forecast, cat_df, category: str, df_full: pd.DataFrame = None, retailer_id: str = None):
+    """
+    Visualize December 2025 forecast vs actual sales
+    """
+    # Get December 2025 forecast data
+    dec_forecast = forecast[(forecast["ds"].dt.month == 12) & (forecast["ds"].dt.year == 2025)].copy()
+    
+    # Get December 2025 actual data from full dataset
+    dec_actual = None
+    if df_full is not None:
+        if retailer_id:
+            dec_actual = (
+                df_full[(df_full["category"].str.lower() == category.lower()) &
+                       (df_full["retailer_id"] == retailer_id) &
+                       (df_full["date"].dt.month == 12) &
+                       (df_full["date"].dt.year == 2025)]
+                .groupby("date", as_index=False)
+                .agg({"sales_volume": "sum"})
+                .rename(columns={"date": "ds", "sales_volume": "y"})
+                .sort_values("ds")
+            )
+        else:
+            dec_actual = (
+                df_full[(df_full["category"].str.lower() == category.lower()) &
+                       (df_full["date"].dt.month == 12) &
+                       (df_full["date"].dt.year == 2025)]
+                .groupby("date", as_index=False)
+                .agg({"sales_volume": "sum"})
+                .rename(columns={"date": "ds", "sales_volume": "y"})
+                .sort_values("ds")
+            )
+    
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(14, 6))
+    
+    # Plot confidence interval for forecast
+    ax.fill_between(dec_forecast["ds"], dec_forecast["yhat_lower"], dec_forecast["yhat_upper"],
+                    alpha=0.25, color="steelblue", label="95% CI (Forecast)")
+    
+    # Plot forecast line with circles at each data point
+    ax.plot(dec_forecast["ds"], dec_forecast["yhat"], color="steelblue", lw=2.5, label="Predicted Sales", zorder=2)
+    ax.scatter(dec_forecast["ds"], dec_forecast["yhat"], s=80, color="steelblue", alpha=0.8, marker="o", zorder=3)
+    
+    # Plot actual sales if available (using circles)
+    if dec_actual is not None and not dec_actual.empty:
+        ax.scatter(dec_actual["ds"], dec_actual["y"], s=100, color="darkgreen", alpha=0.7, label="Actual Sales", marker="o", edgecolors="darkgreen", linewidths=2, zorder=3)
+    
+    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nForecast vs Actual Sales", 
+                 fontsize=14, fontweight="bold")
+    ax.set_ylabel("Sales Volume (units)", fontsize=11)
+    ax.set_xlabel("Date", fontsize=11)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+    ax.legend(loc="upper left", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+    
     plt.tight_layout()
-    out = f"charts/forecast_{category.replace(' ', '_').lower()}.png"
+    out = f"charts/forecast_v2_{category.replace(' ', '_').lower()}_{retailer_id}.png"
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"\n📊 Chart saved → {out}")
+    plt.show()
+    
+    # Print validation metrics
+    if dec_actual is not None and not dec_actual.empty:
+        print(f"\n{'─'*60}")
+        print(f"📊 DECEMBER 2025 VALIDATION METRICS")
+        print(f"{'─'*60}")
+        print(f"Forecast days: {len(dec_forecast)} | Actual days: {len(dec_actual)}")
+        
+        # Align data for comparison
+        if len(dec_forecast) > 0 and len(dec_actual) > 0:
+            min_len = min(len(dec_forecast), len(dec_actual))
+            mae = np.mean(np.abs(dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]))
+            rmse = np.sqrt(np.mean((dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]) ** 2))
+            mape = np.mean(np.abs((dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]) / dec_actual["y"].values[:min_len])) * 100
+            
+            print(f"MAE:  {mae:.2f} units")
+            print(f"RMSE: {rmse:.2f} units")
+            print(f"MAPE: {mape:.2f}%")
+            print(f"Avg Forecast: {dec_forecast['yhat'].mean():.2f} units")
+            print(f"Avg Actual:   {dec_actual['y'].mean():.2f} units")
+        print(f"{'─'*60}")
+
+
+def plot_daily_errors(forecast, dec_actual, category: str, retailer_id: str):
+    """
+    Plot daily prediction errors as a bar chart for December 2025
+    """
+    if dec_actual is None or dec_actual.empty:
+        print(f"⚠️  No actual data available for error plot")
+        return
+    
+    # Get December forecast
+    dec_forecast = forecast[(forecast["ds"].dt.month == 12) & (forecast["ds"].dt.year == 2025)].copy()
+    
+    # Align data for error calculation
+    min_len = min(len(dec_forecast), len(dec_actual))
+    dec_forecast_aligned = dec_forecast.iloc[:min_len].copy().reset_index(drop=True)
+    dec_actual_aligned = dec_actual.iloc[:min_len].copy().reset_index(drop=True)
+    
+    # Calculate errors
+    errors = dec_forecast_aligned["yhat"].values - dec_actual_aligned["y"].values
+    abs_errors = np.abs(errors)
+    dates = dec_actual_aligned["ds"].dt.strftime("%b %d").values
+    
+    # Create bar chart
+    fig, ax = plt.subplots(1, 1, figsize=(14, 6))
+    
+    # Color bars: red for overestimate, blue for underestimate
+    colors = ["#d62728" if e > 0 else "#1f77b4" for e in errors]
+    
+    bars = ax.bar(range(len(errors)), errors, color=colors, alpha=0.7, edgecolor="black", linewidth=0.5)
+    
+    # Add a zero line
+    ax.axhline(y=0, color="black", linestyle="-", linewidth=1)
+    
+    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nDaily Prediction Error (Forecast - Actual)", 
+                 fontsize=14, fontweight="bold")
+    ax.set_ylabel("Error (units)", fontsize=11)
+    ax.set_xlabel("Date", fontsize=11)
+    ax.set_xticks(range(len(dates)))
+    ax.set_xticklabels(dates, rotation=45, ha="right")
+    ax.grid(True, alpha=0.3, axis="y")
+    
+    # Add error statistics
+    mean_error = np.mean(errors)
+    mae = np.mean(abs_errors)
+    textstr = f"Mean Error: {mean_error:.2f} units\nMAE: {mae:.2f} units"
+    ax.text(0.98, 0.97, textstr, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    out = f"charts/error_v2_{category.replace(' ', '_').lower()}_{retailer_id}.png"
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"📊 Error chart saved → {out}")
     plt.show()
 
 
@@ -403,7 +508,22 @@ if __name__ == "__main__":
         )
         
         # Visualise
-        visualise(model, forecast, cat_df, f"{TARGET_CATEGORY} @ {retailer_id}")
+        visualise(model, forecast, cat_df, TARGET_CATEGORY, df_full=merged_df, retailer_id=retailer_id)
+        
+        # Extract December 2025 actual data for error plotting
+        dec_actual = (
+            merged_df[(merged_df["category"].str.lower() == TARGET_CATEGORY.lower()) &
+                     (merged_df["retailer_id"] == retailer_id) &
+                     (merged_df["date"].dt.month == 12) &
+                     (merged_df["date"].dt.year == 2025)]
+            .groupby("date", as_index=False)
+            .agg({"sales_volume": "sum"})
+            .rename(columns={"date": "ds", "sales_volume": "y"})
+            .sort_values("ds")
+        )
+        
+        # Plot daily prediction errors
+        plot_daily_errors(forecast, dec_actual, TARGET_CATEGORY, retailer_id)
         
         # Stock-out estimate
         estimate_stockout(forecast, cat_df, current_stock=current_stock, 
