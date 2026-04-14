@@ -226,14 +226,13 @@ def train_and_forecast_v2(df: pd.DataFrame, category: str, retailer_id: str = No
             .sort_values("ds")
         )
         label = category
-    
-    # Filter to training period: Jan 2024 - Nov 2025 (predict Dec 2025)
+
     training_cutoff = pd.Timestamp("2025-12-01")
     cat_df_train = cat_df[cat_df["ds"] < training_cutoff].copy()
-    
+
     print(f"\n📦 Training on '{label}' — {len(cat_df_train)} daily observations (Jan 2024 - Nov 2025)")
     print(f"   Date range: {cat_df_train['ds'].min().date()} → {cat_df_train['ds'].max().date()}")
-    
+
     max_sales = cat_df_train["y"].max()
     capacity_cap = max_sales * 1.5
     print(f"   Max historical sales: {max_sales:.0f} units")
@@ -257,13 +256,12 @@ def train_and_forecast_v2(df: pd.DataFrame, category: str, retailer_id: str = No
     train_df["cap"] = capacity_cap
     train_df["floor"] = 0
     m.fit(train_df)
-    
-    # Create future dataframe explicitly through Dec 31, 2025
+
     last_train_date = cat_df_train["ds"].max()
     dec_31 = pd.Timestamp("2025-12-31")
     future_dates = pd.date_range(start=last_train_date + pd.Timedelta(days=1), end=dec_31, freq="D")
     future = pd.DataFrame({"ds": future_dates})
-    
+
     future["cap"] = capacity_cap
     future["floor"] = 0
     last_temp = cat_df_train["final_temp_f"].iloc[-30:].mean()
@@ -278,20 +276,12 @@ def train_and_forecast_v2(df: pd.DataFrame, category: str, retailer_id: str = No
     future["is_promotion"] = future["is_promotion"].fillna(last_promotion if pd.notna(last_promotion) else 0)
     forecast = m.predict(future)
     cat_df_train["y_original"] = cat_df_train["y"]
-    
-    # Keep the full dataset for visualization context if available
     cat_df["y_original"] = cat_df["y"]
     return m, forecast, cat_df_train
 
 
 def visualise(m, forecast, cat_df, category: str, df_full: pd.DataFrame = None, retailer_id: str = None):
-    """
-    Visualize December 2025 forecast vs actual sales
-    """
-    # Get December 2025 forecast data
     dec_forecast = forecast[(forecast["ds"].dt.month == 12) & (forecast["ds"].dt.year == 2025)].copy()
-    
-    # Get December 2025 actual data from full dataset
     dec_actual = None
     if df_full is not None:
         if retailer_id:
@@ -315,23 +305,15 @@ def visualise(m, forecast, cat_df, category: str, df_full: pd.DataFrame = None, 
                 .rename(columns={"date": "ds", "sales_volume": "y"})
                 .sort_values("ds")
             )
-    
-    # Create figure
+
     fig, ax = plt.subplots(1, 1, figsize=(14, 6))
-    
-    # Plot confidence interval for forecast
     ax.fill_between(dec_forecast["ds"], dec_forecast["yhat_lower"], dec_forecast["yhat_upper"],
                     alpha=0.25, color="steelblue", label="95% CI (Forecast)")
-    
-    # Plot forecast line with circles at each data point
     ax.plot(dec_forecast["ds"], dec_forecast["yhat"], color="steelblue", lw=2.5, label="Predicted Sales", zorder=2)
     ax.scatter(dec_forecast["ds"], dec_forecast["yhat"], s=80, color="steelblue", alpha=0.8, marker="o", zorder=3)
-    
-    # Plot actual sales if available (using circles instead of squares)
     if dec_actual is not None and not dec_actual.empty:
         ax.scatter(dec_actual["ds"], dec_actual["y"], s=100, color="darkgreen", alpha=0.7, label="Actual Sales", marker="o", edgecolors="darkgreen", linewidths=2, zorder=3)
-    
-    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nForecast vs Actual Sales", 
+    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nForecast vs Actual Sales",
                  fontsize=14, fontweight="bold")
     ax.set_ylabel("Sales Volume (units)", fontsize=11)
     ax.set_xlabel("Date", fontsize=11)
@@ -340,27 +322,22 @@ def visualise(m, forecast, cat_df, category: str, df_full: pd.DataFrame = None, 
     ax.legend(loc="upper left", fontsize=11)
     ax.grid(True, alpha=0.3)
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
-    
     plt.tight_layout()
     out = f"charts/forecast_v2_{category.replace(' ', '_').lower()}.png"
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"\n📊 Chart saved → {out}")
-    plt.show()
-    
-    # Print validation metrics
+    plt.close()
+
     if dec_actual is not None and not dec_actual.empty:
         print(f"\n{'─'*60}")
         print(f"📊 DECEMBER 2025 VALIDATION METRICS")
         print(f"{'─'*60}")
         print(f"Forecast days: {len(dec_forecast)} | Actual days: {len(dec_actual)}")
-        
-        # Align data for comparison
         if len(dec_forecast) > 0 and len(dec_actual) > 0:
             min_len = min(len(dec_forecast), len(dec_actual))
             mae = np.mean(np.abs(dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]))
             rmse = np.sqrt(np.mean((dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]) ** 2))
             mape = np.mean(np.abs((dec_forecast["yhat"].values[:min_len] - dec_actual["y"].values[:min_len]) / dec_actual["y"].values[:min_len])) * 100
-            
             print(f"MAE:  {mae:.2f} units")
             print(f"RMSE: {rmse:.2f} units")
             print(f"MAPE: {mape:.2f}%")
@@ -370,58 +347,38 @@ def visualise(m, forecast, cat_df, category: str, df_full: pd.DataFrame = None, 
 
 
 def plot_daily_errors(forecast, dec_actual, category: str, retailer_id: str):
-    """
-    Plot daily prediction errors as a bar chart for December 2025
-    """
     if dec_actual is None or dec_actual.empty:
         print(f"⚠️  No actual data available for error plot")
         return
-    
-    # Get December forecast
     dec_forecast = forecast[(forecast["ds"].dt.month == 12) & (forecast["ds"].dt.year == 2025)].copy()
-    
-    # Align data for error calculation
     min_len = min(len(dec_forecast), len(dec_actual))
     dec_forecast_aligned = dec_forecast.iloc[:min_len].copy().reset_index(drop=True)
     dec_actual_aligned = dec_actual.iloc[:min_len].copy().reset_index(drop=True)
-    
-    # Calculate errors
     errors = dec_forecast_aligned["yhat"].values - dec_actual_aligned["y"].values
     abs_errors = np.abs(errors)
     dates = dec_actual_aligned["ds"].dt.strftime("%b %d").values
-    
-    # Create bar chart
     fig, ax = plt.subplots(1, 1, figsize=(14, 6))
-    
-    # Color bars: red for overestimate, blue for underestimate
     colors = ["#d62728" if e > 0 else "#1f77b4" for e in errors]
-    
-    bars = ax.bar(range(len(errors)), errors, color=colors, alpha=0.7, edgecolor="black", linewidth=0.5)
-    
-    # Add a zero line
+    ax.bar(range(len(errors)), errors, color=colors, alpha=0.7, edgecolor="black", linewidth=0.5)
     ax.axhline(y=0, color="black", linestyle="-", linewidth=1)
-    
-    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nDaily Prediction Error (Forecast - Actual)", 
+    ax.set_title(f"Retail Inventory Twin — {category} @ {retailer_id} December 2025\nDaily Prediction Error (Forecast - Actual)",
                  fontsize=14, fontweight="bold")
     ax.set_ylabel("Error (units)", fontsize=11)
     ax.set_xlabel("Date", fontsize=11)
     ax.set_xticks(range(len(dates)))
     ax.set_xticklabels(dates, rotation=45, ha="right")
     ax.grid(True, alpha=0.3, axis="y")
-    
-    # Add error statistics
     mean_error = np.mean(errors)
     mae = np.mean(abs_errors)
     textstr = f"Mean Error: {mean_error:.2f} units\nMAE: {mae:.2f} units"
     ax.text(0.98, 0.97, textstr, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', horizontalalignment='right',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-    
     plt.tight_layout()
     out = f"charts/error_v2_{category.replace(' ', '_').lower()}_{retailer_id}.png"
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"📊 Error chart saved → {out}")
-    plt.show()
+    plt.close()
 
 
 def estimate_stockout(forecast: pd.DataFrame, cat_df: pd.DataFrame,
@@ -457,18 +414,14 @@ if __name__ == "__main__":
     print("  ✅ Use: Linear growth (simple & predictable)")
     print("="*60 + "\n")
 
-    # 1. Load
     sales_df = load_sales(CSV_PATH)
 
-    # 2. Weather
     start_dt = sales_df["date"].min().to_pydatetime()
     end_dt   = sales_df["date"].max().to_pydatetime()
     weather_df = fetch_weather_range(OWM_API_KEY, CITY, start_dt, end_dt)
 
-    # 3. Merge & persist
     merged_df = build_joined_db(sales_df, weather_df, DB_PATH)
 
-    # 4. Get unique retailers
     category_data = merged_df[merged_df["category"].str.lower() == TARGET_CATEGORY.lower()]
     retailers = sorted(category_data["retailer_id"].unique())
 
@@ -477,7 +430,6 @@ if __name__ == "__main__":
     print(f"   Retailers: {', '.join(retailers)}")
     print(f"{'='*60}")
 
-    # 5. Train and forecast for each retailer
     stockout_summary = []
 
     for retailer_id in retailers:
@@ -492,8 +444,7 @@ if __name__ == "__main__":
         )
 
         visualise(model, forecast, cat_df, TARGET_CATEGORY, df_full=merged_df, retailer_id=retailer_id)
-        
-        # Extract December 2025 actual data for error plotting
+
         dec_actual = (
             merged_df[(merged_df["category"].str.lower() == TARGET_CATEGORY.lower()) &
                      (merged_df["retailer_id"] == retailer_id) &
@@ -504,8 +455,7 @@ if __name__ == "__main__":
             .rename(columns={"date": "ds", "sales_volume": "y"})
             .sort_values("ds")
         )
-        
-        # Plot daily prediction errors
+
         plot_daily_errors(forecast, dec_actual, TARGET_CATEGORY, retailer_id)
 
         estimate_stockout(forecast, cat_df, current_stock=current_stock,
@@ -533,7 +483,6 @@ if __name__ == "__main__":
             "reorder_quantity": reorder_qty
         })
 
-    # 6. Print summary
     print(f"\n{'='*60}")
     print(f"📊 STOCK-OUT SUMMARY — CLEAN SLATE MODEL v2")
     print(f"{'='*60}\n")
